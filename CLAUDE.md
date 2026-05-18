@@ -22,7 +22,7 @@ $20,000 Grand Prize (real OpenROAD PnR timing on NG45). See `docs/PRD.md`,
 - Modifying the challenge evaluation/scoring functions.
 - Benchmark-specific hardcoded solutions; 90° rotations; soft-macro resizing;
   proprietary placement tools.
-- Forking the whole AutoDMP pipeline — extract only the MOTPE search loop.
+- Depending on a CUDA build toolchain — the analytical engine stays plain PyTorch.
 
 ## Workflow
 - Follow `docs/PLAN.md` one step at a time; never skip ahead.
