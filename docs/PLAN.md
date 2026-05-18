@@ -10,12 +10,16 @@ time: finish it, check it off, confirm with the user, then move to the next.
 
 ## Day 1 — foundation (critical path)
 
-### [ ] Step 1 — Stand up the evaluation harness
+### [x] Step 1 — Stand up the evaluation harness
 - Goal: clone the challenge repo into `external/`, install deps, get the
   evaluator running; reproduce the RePlAce (~1.46) and SA (~2.13) baselines.
 - Files: `external/macro-place-challenge-2026/`, `requirements.txt`, `Dockerfile`.
 - Done when: `evaluate` runs an example placer on ibm01 and prints a proxy cost
   matching the published baselines.
+- DONE: challenge repo + TILOS submodule cloned, `uv sync` installed deps,
+  evaluator runs all 17 benchmarks. Greedy placer reproduces the README table
+  exactly (AVG 2.2109; SA 2.1251; RePlAce 1.4578). SA/RePlAce are published
+  reference numbers from the TILOS paper, not runnable placers in the repo.
 
 ### [ ] Step 2 — DREAMPlace engine + valid `placer.py`
 - Goal: integrate DREAMPlace as a submodule; produce a `placer.py` that returns
@@ -43,7 +47,7 @@ time: finish it, check it off, confirm with the user, then move to the next.
 - Goal: add the WireMask-EA HPWL refinement and per-macro orientation search.
 - Files: `src/hrt_placer/refine_wiremask.py`, `src/hrt_placer/orientation.py`,
   `external/WireMask-BBO/`.
-- Done when: combined pipeline reaches proxy ~<=1.05 averaged over 18 benchmarks.
+- Done when: combined pipeline reaches proxy ~<=1.05 averaged over 17 benchmarks.
 
 ## Day 3 — Grand Prize layer + ship
 
@@ -56,9 +60,9 @@ time: finish it, check it off, confirm with the user, then move to the next.
 
 ### [ ] Step 7 — Portfolio runner + full validation
 - Goal: budget allocation across stages with a hard per-benchmark timeout;
-  full 18-benchmark run.
+  full 17-benchmark run.
 - Files: `src/hrt_placer/portfolio.py`, `tests/`.
-- Done when: all 18 benchmarks complete legally within the 1-hour cap.
+- Done when: all 17 benchmarks complete legally within the 1-hour cap.
 
 ### [ ] Step 8 — Reproducible packaging + submission
 - Goal: finalize Dockerfile, pin submodules, vendor licenses, write README.

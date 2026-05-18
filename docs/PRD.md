@@ -9,7 +9,7 @@ A macro placer for the Partcl/HRT Macro Placement Challenge 2026. It exposes a
 ## Problem
 Place hard macros (SRAMs, IP) and movable soft macros on chip canvases with
 zero hard-macro overlap, minimizing the TILOS proxy cost
-`1.0·Wirelength + 0.5·Density + 0.5·Congestion` across 18 IBM ICCAD04
+`1.0·Wirelength + 0.5·Density + 0.5·Congestion` across 17 IBM ICCAD04
 benchmarks, within 1 hour per benchmark on one RTX 6000 Ada GPU. The Grand
 Prize is then decided by real PnR timing, where the proxy cost is only a
 weak correlate — so the placement must also be genuinely routable and
@@ -32,6 +32,10 @@ not an interactive tool.
   cones) — there is no SDC in the placer interface.
 - **Feasibility-gate-aware candidate selection**: never ship a placement
   expected to fail Tier 2's `WNS_sub >= min(WNS_SA, WNS_RP)` gate.
+- **>=12 um macro-to-macro clearance** in submitted placements, so Tier 2's
+  auto-spacing pass does not silently override our coordinates.
+- **GPU soft-macro co-optimization** — soft macros are movable; the built-in
+  `plc.optimize_stdcells()` is minutes-per-call, so we co-optimize them on GPU.
 - A portfolio runner with strict per-benchmark timeout handling.
 - A reproducible Dockerfile (`pytorch/pytorch:2.5.1-cuda12.4`, Python 3.11).
 
@@ -59,7 +63,7 @@ not an interactive tool.
    search -> feasibility-gate-aware selection of the best candidate -> return.
 
 ## Success criteria
-- Top-7 proxy-cost ranking (target proxy ~<=1.05 across the 18 benchmarks).
+- Top-7 proxy-cost ranking (target proxy ~<=1.05 across the 17 benchmarks).
 - Beats both SA and RePlAce baselines on NG45 WNS/TNS/Area in OpenROAD PnR.
 - Every returned placement is legal: zero hard-macro overlap, in-canvas,
   fixed macros pinned.

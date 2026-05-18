@@ -26,7 +26,9 @@ The AI must follow every rule here on every change.
   in-canvas, fixed macros unmoved, only Klein-4 orientations.
 - The placer MUST finish within 1 hour per benchmark — implement a hard
   internal timeout that returns the best legal placement found so far.
-- Validate on all 18 IBM benchmarks before declaring any step done.
+- Validate on all 17 IBM benchmarks before declaring any step done.
+- Leave >=12 um clearance between macros so Tier 2 auto-spacing does not
+  override submitted coordinates.
 - A change that lowers proxy cost but worsens estimated timing is NOT an
   improvement — the Tier 2 gate `WNS_sub >= min(WNS_SA, WNS_RP)` governs.
 

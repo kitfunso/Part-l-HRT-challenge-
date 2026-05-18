@@ -1,0 +1,11 @@
+# Cloned challenge harness / eval environment — not part of our submission
+external/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local placement artifacts
+*.png
+results/
