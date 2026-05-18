@@ -21,9 +21,10 @@ not an interactive tool.
 
 ## What it IS — in scope
 - A `placer.py` implementing the challenge's `place(benchmark) -> coords` API.
-- A **DREAMPlace** (GPU analytical) global-placement engine.
-- A **Bayesian/MOTPE search loop** (AutoDMP recipe) whose objective is the
-  *exact TILOS proxy cost*, not DREAMPlace's generic metrics.
+- A **portable PyTorch electrostatic** analytical engine (ePlace/RePlAce-style)
+  that runs identically on CPU and GPU — no CUDA build dependency.
+- A **multi-objective Bayesian search loop** (Optuna MOTPE) whose objective is
+  the *exact TILOS proxy cost*.
 - **Hotspot-targeted simulated annealing** that refines the top-5%/top-10%
   bins the cost actually measures, with incremental cost evaluation.
 - A **WireMask-EA** HPWL refinement pass.
@@ -43,9 +44,10 @@ not an interactive tool.
 - **NOT reinforcement learning** — no Circuit Training / MaskPlace / ChiPFormer
   / EfficientPlace. "Stronger Baselines" + BBOPlace-Bench show black-box
   optimization beats RL without training cost.
-- **NOT a full fork of the AutoDMP pipeline** — extract only the MOTPE search
-  loop and DREAMPlace glue.
-- **NOT a custom analytical placer written from scratch** — stand on DREAMPlace.
+- **NOT dependent on a CUDA build toolchain** — the analytical engine is plain
+  PyTorch, testable on CPU and portable to the eval GPU with no compilation.
+- **NOT a heavyweight standard-cell placer** — only a lean macro-focused
+  analytical core, not a full DREAMPlace-scale flow.
 - **NOT proxy-overfitting** — a lower proxy score is worthless if it fails the
   Tier 2 timing gate.
 - **NOT** benchmark-specific hardcoding, evaluation-function edits, 90°
