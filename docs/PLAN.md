@@ -37,12 +37,20 @@ time: finish it, check it off, confirm with the user, then move to the next.
 
 ## Day 2 — the moat
 
-### [ ] Step 3 — Exact proxy cost as the search objective
+### [x] Step 3 — Exact proxy cost as the search objective
 - Goal: wire the exact TILOS proxy cost as a black-box objective; add the
   MOTPE/Bayesian search loop over DREAMPlace hyperparameters.
 - Files: `src/hrt_placer/proxy_cost.py`, `src/hrt_placer/search.py`.
 - Done when: BO search measurably lowers proxy cost vs stock DREAMPlace on a
   10-benchmark sample.
+- DONE: `proxy_cost.py` is a faithful from-Benchmark port of plc_client_os
+  (grid routing for congestion, exact rect/bin density, ABU-5) — calibrates
+  to the real evaluator at Pearson ~0.98, density exact. `search.py` is a
+  self-contained TPE optimizer. 20-trial search over a 10-benchmark sample
+  cut proxy -12.7% mean (all 10 improved, -6% to -20%); spot-checked on the
+  real evaluator (ibm01/08/13: -11% to -18%, all legal). CAVEAT: every
+  hyperparameter railed to its lower bound — stock engine defaults were
+  mistuned; a wider-bound re-run should be revisited before Step 7.
 
 ### [ ] Step 4 — Hotspot-targeted SA refinement
 - Goal: SA that attacks the top-5%/top-10% bins, with incremental cost deltas;
