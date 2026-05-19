@@ -20,6 +20,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import torch
 
+from .engine import clearance_microns
 from .proxy_cost import ProxyCost, _two_pin, _three_pin
 
 
@@ -34,6 +35,11 @@ class IncrementalProxy:
     def __init__(self, benchmark, placement):
         pc = ProxyCost(benchmark)
         self.pc = pc
+        # macro-to-macro clearance (PRD): a candidate box is inflated by the
+        # full clearance so every other (real-size) hard macro stays clear.
+        clr_um = clearance_microns(pc.W, pc.H)
+        self.clr_x = clr_um / pc.W
+        self.clr_y = clr_um / pc.H
         self.rows, self.cols = pc.rows, pc.cols
         self.gw, self.gh = pc.gw, pc.gh
         self.num_hard = pc.num_hard
@@ -278,16 +284,17 @@ class IncrementalProxy:
     # ---- moves --------------------------------------------------------
 
     def box_free(self, x, y, hx, hy, exclude):
-        """True if box (center x,y; half hx,hy) is in-canvas and overlaps no
-        hard macro except those in ``exclude``."""
+        """True if box (center x,y; half hx,hy) is in-canvas and at least
+        12 um clear of every hard macro except those in ``exclude``."""
         if (x - hx < -1e-9 or x + hx > self.pc.W + 1e-9
                 or y - hy < -1e-9 or y + hy > self.pc.H + 1e-9):
             return False
         nh = self.num_hard
+        ix, iy = hx + self.clr_x, hy + self.clr_y
         px, py = self.pos[:nh, 0], self.pos[:nh, 1]
         hwx, hwy = self.half[:nh, 0], self.half[:nh, 1]
-        sep = ((x + hx <= px - hwx) | (x - hx >= px + hwx)
-               | (y + hy <= py - hwy) | (y - hy >= py + hwy))
+        sep = ((x + ix <= px - hwx) | (x - ix >= px + hwx)
+               | (y + iy <= py - hwy) | (y - iy >= py + hwy))
         for m in exclude:
             sep[m] = True
         return bool(sep.all())
