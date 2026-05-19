@@ -56,12 +56,25 @@ time: finish it, check it off, confirm with the user, then move to the next.
   assumes a usable initial placement; runtime per-design self-tuning via
   search.py is the Tier-2 hedge, to be wired up in Step 7.
 
-### [ ] Step 4 — Hotspot-targeted SA refinement
+### [x] Step 4 — Hotspot-targeted SA refinement
 - Goal: SA that attacks the top-5%/top-10% bins, with incremental cost deltas;
   16-core parallel chains.
 - Files: `src/hrt_placer/refine_sa.py`.
 - Done when: SA further lowers proxy cost on the sample without legality
   violations or timeouts.
+- DONE: `refine_sa.py` adds `IncrementalProxy` (a mutable port of the proxy
+  cost — verified exact vs `ProxyCost` at init, tracks single-macro moves to
+  ~1e-7) and a cold simulated-annealing refiner. A move re-routes only the
+  nets on the moved hard macro and re-derives the O(bins) congestion/density
+  aggregates, so a chain runs ~1k+ iters/s even on ibm17; 16 per-seed-
+  diversified chains run as parallel processes, best legal result wins. Move
+  set: Gaussian perturbations + equal/similar-size macro swaps — the compact
+  analytical placement leaves ~94% of free nudges overlapping a neighbour, so
+  swaps carry the refinement; congestion top-bin heat biases macro selection.
+  On the ibm01/03/09/13/17 sample SA lowers proxy 0.5-2.1% (mean -1.1% by
+  ProxyCost; real-evaluator confirmed -0.4% to -1.3% on ibm01/03/09/13), every
+  result legal, every benchmark inside its time budget. Gains are modest
+  because the Step-3 analytical placement is already near a local optimum.
 
 ### [ ] Step 5 — WireMask-EA pass + Klein-4 orientation search
 - Goal: add the WireMask-EA HPWL refinement and per-macro orientation search.
