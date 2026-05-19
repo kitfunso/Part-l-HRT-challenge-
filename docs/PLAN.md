@@ -46,11 +46,15 @@ time: finish it, check it off, confirm with the user, then move to the next.
 - DONE: `proxy_cost.py` is a faithful from-Benchmark port of plc_client_os
   (grid routing for congestion, exact rect/bin density, ABU-5) — calibrates
   to the real evaluator at Pearson ~0.98, density exact. `search.py` is a
-  self-contained TPE optimizer. 20-trial search over a 10-benchmark sample
-  cut proxy -12.7% mean (all 10 improved, -6% to -20%); spot-checked on the
-  real evaluator (ibm01/08/13: -11% to -18%, all legal). CAVEAT: every
-  hyperparameter railed to its lower bound — stock engine defaults were
-  mistuned; a wider-bound re-run should be revisited before Step 7.
+  self-contained TPE optimizer. Widened-bound search over a 10-benchmark
+  sample cut proxy -15.9% mean; the tuned config (near-minimal intervention
+  — density spreading off, gentle WL+overlap cleanup of the initial
+  placement) is now the engine default. Full 17-benchmark validation: AVG
+  proxy 1.2971 (was 1.7748), legal on all 17, beats RePlAce (1.4578) on
+  every benchmark (-5% to -27%, -11% mean) and SA on every benchmark — the
+  Step 2 "RePlAce still ahead" gap is closed. CAVEAT: the tuned config
+  assumes a usable initial placement; runtime per-design self-tuning via
+  search.py is the Tier-2 hedge, to be wired up in Step 7.
 
 ### [ ] Step 4 — Hotspot-targeted SA refinement
 - Goal: SA that attacks the top-5%/top-10% bins, with incremental cost deltas;
