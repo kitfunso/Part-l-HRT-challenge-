@@ -21,12 +21,12 @@ from .proxy_cost import ProxyCost
 
 # name -> (low, high, kind); kind in {"lin", "log", "int"}
 DEFAULT_SPACE = {
-    "lr": (0.006, 0.04, "log"),
-    "gamma_start": (0.04, 0.14, "lin"),
-    "gamma_end": (0.006, 0.025, "lin"),
-    "density_weight": (5.0, 28.0, "log"),
-    "overlap_weight": (10.0, 40.0, "log"),
-    "n_iters": (450, 950, "int"),
+    "lr": (0.002, 0.04, "log"),
+    "gamma_start": (0.015, 0.14, "lin"),
+    "gamma_end": (0.002, 0.025, "lin"),
+    "density_weight": (0.5, 28.0, "log"),
+    "overlap_weight": (2.0, 40.0, "log"),
+    "n_iters": (150, 900, "int"),
 }
 
 
