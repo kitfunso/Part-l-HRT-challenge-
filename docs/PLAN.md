@@ -72,9 +72,12 @@ time: finish it, check it off, confirm with the user, then move to the next.
   analytical placement leaves ~94% of free nudges overlapping a neighbour, so
   swaps carry the refinement; congestion top-bin heat biases macro selection.
   On the ibm01/03/09/13/17 sample SA lowers proxy 0.5-2.1% (mean -1.1% by
-  ProxyCost; real-evaluator confirmed -0.4% to -1.3% on ibm01/03/09/13), every
-  result legal, every benchmark inside its time budget. Gains are modest
-  because the Step-3 analytical placement is already near a local optimum.
+  ProxyCost), every result legal, every benchmark inside its time budget. The
+  real evaluator confirms a smaller but positive gain on all five (-0.13% to
+  -1.27%): SA optimizes the Pearson-0.98 ProxyCost, so part of the surrogate
+  gain does not survive. Gains are modest because the Step-3 analytical
+  placement is already near a local optimum; on the largest design (ibm17)
+  the real gain is marginal (-0.13%).
 
 ### [ ] Step 5 — WireMask-EA pass + Klein-4 orientation search
 - Goal: add the WireMask-EA HPWL refinement and per-macro orientation search.
