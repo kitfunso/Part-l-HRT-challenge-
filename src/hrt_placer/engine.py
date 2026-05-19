@@ -14,15 +14,20 @@ import torch
 
 
 def clearance_microns(canvas_w, canvas_h):
-    """Target macro-to-macro clearance.
+    """Target macro-to-macro clearance in microns.
 
-    The PRD asks for >=12 um so Tier-2 auto-spacing leaves our coordinates
-    untouched. On large real dies that is a small fraction of the canvas; on
-    the tiny abstract-unit IBM dies (canvas ~23) a literal 12 would exceed
-    the die, so the clearance is capped at 0.4% of the smaller canvas
-    dimension (which reproduces the known-good legalizer spacing there).
+    SCORING.md asks for >=12 um in submitted placements so the Tier-2 ORFS
+    auto-spacing leaves our coordinates untouched. On real dies (NG45
+    canvases ~900-2100 um) 12 um is a small fraction of the canvas and is
+    used directly. The abstract-unit IBM dies have a ~23-unit canvas where
+    12 would exceed the die; there Tier-1 proxy scores submitted
+    coordinates unchanged and needs no clearance, so only the legalizer's
+    base gap is kept.
     """
-    return min(12.0, 0.004 * min(canvas_w, canvas_h))
+    m = min(canvas_w, canvas_h)
+    if m < 200.0:
+        return 0.003 * m
+    return min(12.0, 0.03 * m)
 
 
 def _seg_amax(vals, segid, nseg):
