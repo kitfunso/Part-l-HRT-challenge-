@@ -79,11 +79,23 @@ time: finish it, check it off, confirm with the user, then move to the next.
   placement is already near a local optimum; on the largest design (ibm17)
   the real gain is marginal (-0.13%).
 
-### [ ] Step 5 — WireMask-EA pass + Klein-4 orientation search
-- Goal: add the WireMask-EA HPWL refinement and per-macro orientation search.
-- Files: `src/hrt_placer/refine_wiremask.py`, `src/hrt_placer/orientation.py`,
-  `external/WireMask-BBO/`.
-- Done when: combined pipeline reaches proxy ~<=1.05 averaged over 17 benchmarks.
+### [x] Step 5 — WireMask-EA pass + Klein-4 orientation search — DESCOPED
+- Original goal: WireMask-EA HPWL refinement + per-macro orientation search,
+  targeting proxy ~<=1.05 over 17 benchmarks.
+- DESCOPED after investigating the actual submission interface:
+  - Orientation search is infeasible. `place(benchmark)` returns a
+    `[num_macros, 2]` positions tensor only (`evaluate.py`); the proxy applies
+    *fixed* benchmark pin offsets (`objective.py:_set_placement`) and the DEF
+    writer emits the node's default orientation. There is no channel to submit
+    orientations, so `orientation.py` would be dead code.
+  - WireMask-EA cannot reach <=1.05. The proxy is
+    `HPWL + 0.5*density + 0.5*congestion`; HPWL is only ~0.06 of a ~1.30
+    proxy (congestion/density dominate). A wirelength-mask-guided method
+    cannot move the proxy ~-19% on top of an engine that already beats
+    RePlAce on all 17 (AVG 1.3011, -11% mean).
+  - With two days to the deadline, the unaddressed Grand-Prize criterion is
+    real OpenROAD timing, not further proxy reduction. Effort moves to Step 6.
+- WireMask-EA remains a possible Step 7 portfolio member if time allows.
 
 ## Day 3 — Grand Prize layer + ship
 
