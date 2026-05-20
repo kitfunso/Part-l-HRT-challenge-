@@ -52,7 +52,20 @@ class MyPlacer:
         env = os.environ.get("HRT_TIME_BUDGET")
         if env:
             time_budget = float(env)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # ``torch.cuda.is_available()`` returns True even when the bundled
+        # kernels do not support the host GPU's compute capability (e.g.
+        # pytorch 2.5.1 on Blackwell). A tiny smoke op confirms kernels
+        # actually run; if it raises, fall back to CPU so the submission
+        # still produces a legal placement on any host.
+        self.device = "cpu"
+        if torch.cuda.is_available():
+            try:
+                _ = (torch.zeros(2, device="cuda") + 1.0).sum().item()
+                self.device = "cuda"
+            except Exception as exc:
+                print(f"[placer] CUDA available but kernel smoke failed "
+                      f"({type(exc).__name__}: {exc}); falling back to CPU",
+                      file=sys.stderr, flush=True)
         self.time_budget = time_budget
 
     def place(self, benchmark):
@@ -117,16 +130,26 @@ class MyPlacer:
                 best_name = cfg["name"]
 
         # Last-resort fallback: no candidate finished legally within budget.
-        # Re-run the baseline against the remaining engine budget (still bounded
-        # below the 45% engine share). Should not fire in practice because the
-        # engine's shelf-pack legaliser guarantees a legal result.
+        # Re-run the baseline against the remaining engine budget; if even
+        # that fails (e.g. CUDA driver/kernel mismatch on the eval host),
+        # drop to CPU and retry. The engine's shelf-pack legaliser guarantees
+        # a legal result on CPU, so this is the absolute submission safety net.
         if best_placement is None:
             print("[placer] portfolio produced no legal candidate; running "
                   "fallback baseline engine", file=sys.stderr, flush=True)
             fallback_deadline = t0 + 0.45 * self.time_budget
-            best_placement = AnalyticalPlacer(device=self.device).place(
-                benchmark, deadline=fallback_deadline)
-            best_name = "fallback_baseline"
+            try:
+                best_placement = AnalyticalPlacer(device=self.device).place(
+                    benchmark, deadline=fallback_deadline)
+                best_name = "fallback_baseline"
+            except Exception as exc:
+                print(f"[placer] fallback engine on {self.device} raised "
+                      f"{type(exc).__name__}: {exc}; retrying on CPU",
+                      file=sys.stderr, flush=True)
+                traceback.print_exc(file=sys.stderr)
+                best_placement = AnalyticalPlacer(device="cpu").place(
+                    benchmark, deadline=fallback_deadline)
+                best_name = "fallback_baseline_cpu"
 
         # Fill best_cost when we skipped scoring (pc=None or pc broke). Keeps
         # the winner-log line meaningful instead of printing proxy=inf.
