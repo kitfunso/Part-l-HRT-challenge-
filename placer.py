@@ -23,6 +23,7 @@ import torch  # noqa: E402
 from hrt_placer.engine import AnalyticalPlacer  # noqa: E402
 from hrt_placer.proxy_cost import ProxyCost  # noqa: E402
 from hrt_placer.refine_sa import refine  # noqa: E402
+from hrt_placer.refine_soft import refine_soft_macros  # noqa: E402
 from hrt_placer.search import _is_legal  # noqa: E402
 
 
@@ -124,8 +125,36 @@ class MyPlacer:
                 continue
             print(f"[placer] candidate '{cfg['name']}' proxy={cost:.4f}",
                   file=sys.stderr, flush=True)
-            if cost < best_cost:
-                best_cost = cost
+
+            # Post-engine soft-macro refinement (Adam on soft slice, hard frozen)
+            # with a per-candidate ProxyCost gate -- adopt the refined placement
+            # only if it is strictly lower-proxy AND legal. Guaranteed
+            # non-regression: the engine output is the safe fallback.
+            refined_cost = cost
+            try:
+                refined_um, refine_dt = refine_soft_macros(
+                    benchmark, placement, device=self.device)
+                if _is_legal(refined_um, benchmark):
+                    r_cost = float(pc(refined_um)["proxy_cost"])
+                    print(f"[placer]   soft-refine '{cfg['name']}' "
+                          f"proxy={r_cost:.4f} ({(r_cost/cost-1)*100:+.2f}%) "
+                          f"dt={refine_dt:.1f}s",
+                          file=sys.stderr, flush=True)
+                    if r_cost < cost:
+                        placement = refined_um
+                        refined_cost = r_cost
+                else:
+                    print(f"[placer]   soft-refine '{cfg['name']}' produced "
+                          f"illegal placement; keeping engine result",
+                          file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"[placer]   soft-refine '{cfg['name']}' raised "
+                      f"{type(exc).__name__}: {exc}; keeping engine result",
+                      file=sys.stderr, flush=True)
+                traceback.print_exc(file=sys.stderr)
+
+            if refined_cost < best_cost:
+                best_cost = refined_cost
                 best_placement = placement
                 best_name = cfg["name"]
 
