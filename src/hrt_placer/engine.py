@@ -109,6 +109,9 @@ class AnalyticalPlacer:
         density_weight=0.5,
         overlap_weight=6.0,
         legalize_gap=0.003,
+        density_topk_frac=1.0,
+        congestion_weight=0.0,
+        congestion_topk_frac=0.05,
         seed=0,
         device="cpu",
         verbose=False,
@@ -121,6 +124,15 @@ class AnalyticalPlacer:
         self.density_weight = density_weight
         self.overlap_weight = overlap_weight
         self.legalize_gap = legalize_gap
+        # density_topk_frac: align engine density loss with the TILOS proxy
+        # (which looks at the top 10% of bins, not the full mean). Setting
+        # this to 1.0 reverts to the previous mean-over-all-bins behaviour.
+        self.density_topk_frac = density_topk_frac
+        # congestion_weight: optional differentiable congestion surrogate
+        # (per-bin wire-density from net bboxes). 0.0 disables it (preserving
+        # original objective). Tune via search.py or per-portfolio config.
+        self.congestion_weight = congestion_weight
+        self.congestion_topk_frac = congestion_topk_frac
         self.seed = seed
         self.device = device
         self.verbose = verbose
@@ -131,6 +143,26 @@ class AnalyticalPlacer:
         fallback still runs, so the result is legal even on a timeout."""
         device = torch.device(self.device)
         torch.manual_seed(self.seed)
+        # Determinism across reruns / across the dev (RTX 5080) vs judges'
+        # (RTX 6000 Ada) GPUs. Without these, scatter_reduce + Adam + TF32 +
+        # cuDNN's autotuner can produce different placements on the same seed
+        # across machines or even reruns. Wrapped in try/except so older
+        # PyTorch builds and ops without deterministic implementations do not
+        # raise. ``use_deterministic_algorithms(warn_only=True)`` warns instead
+        # of crashing if a non-deterministic kernel is unavoidable.
+        if device.type == "cuda":
+            try:
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+                torch.backends.cuda.matmul.allow_tf32 = False
+                torch.backends.cudnn.allow_tf32 = False
+                # CUBLAS_WORKSPACE_CONFIG is required by some CUDA versions
+                # for deterministic matmul; setdefault so user overrides win.
+                import os as _os
+                _os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+                torch.use_deterministic_algorithms(True, warn_only=True)
+            except Exception:
+                pass
 
         N = benchmark.num_macros
         nh = benchmark.num_hard_macros
@@ -203,9 +235,18 @@ class AnalyticalPlacer:
                 loss = loss + self.wl_weight * wl
 
             dens = self._density_loss(
-                var, half, bx_lo, bx_hi, by_lo, by_hi, bin_area, density_target
+                var, half, bx_lo, bx_hi, by_lo, by_hi, bin_area,
+                density_target, self.density_topk_frac
             )
             loss = loss + self.density_weight * dens
+
+            if self.congestion_weight > 0 and has_nets:
+                cong = self._congestion_loss(
+                    pin_pos, p_netid, num_nets, net_w,
+                    bx_lo, bx_hi, by_lo, by_hi, bin_area,
+                    self.congestion_topk_frac
+                )
+                loss = loss + self.congestion_weight * cong
 
             if tri is not None and ov_w > 0:
                 ovl = self._overlap_loss(var, half, nh, tri)
@@ -275,12 +316,19 @@ class AnalyticalPlacer:
         return total / max(1, num_nets)
 
     @staticmethod
-    def _density_loss(pos, half, bx_lo, bx_hi, by_lo, by_hi, bin_area, target):
+    def _density_loss(pos, half, bx_lo, bx_hi, by_lo, by_hi, bin_area, target,
+                      topk_frac=1.0):
         """Squared bin-density overflow above the uniform-spread target.
 
         The mean density is constant (= utilization) and carries no gradient;
         penalizing overflow above ``target`` produces a real spreading force
         that pushes macros out of overcrowded bins.
+
+        ``topk_frac`` aligns the penalty with the TILOS proxy: the proxy
+        measures the top 10% of bin densities, not the full mean. Setting
+        ``topk_frac`` < 1.0 averages only that top fraction of overflow,
+        focusing the gradient on the bins the proxy actually scores.
+        ``topk_frac=1.0`` recovers the original mean-over-all-bins behaviour.
         """
         mx_lo = (pos[:, 0] - half[:, 0]).unsqueeze(1)
         mx_hi = (pos[:, 0] + half[:, 0]).unsqueeze(1)
@@ -292,7 +340,68 @@ class AnalyticalPlacer:
             torch.minimum(my_hi, by_hi) - torch.maximum(my_lo, by_lo), min=0.0)
         occ = torch.einsum("nr,nc->rc", oy, ox)
         density = occ / bin_area
-        return torch.clamp(density - target, min=0.0).pow(2).mean()
+        overflow_sq = torch.clamp(density - target, min=0.0).pow(2)
+        if topk_frac >= 1.0:
+            return overflow_sq.mean()
+        flat = overflow_sq.flatten()
+        k = max(1, int(topk_frac * flat.numel()))
+        return torch.topk(flat, k).values.mean()
+
+    @staticmethod
+    def _congestion_loss(pin_pos, p_netid, num_nets, net_w,
+                         bx_lo, bx_hi, by_lo, by_hi, bin_area, topk_frac=0.05):
+        """Differentiable surrogate of the TILOS routing-congestion term.
+
+        For each net, build its (non-smooth) pin bounding box and rasterise it
+        onto the bin grid weighted by ``net_w``. Summing per bin gives a
+        wire-demand proxy that grows when many nets route through the same
+        area. The top ``topk_frac`` of bins (default 5%, matching the proxy's
+        top-5% congestion metric) are averaged and squared.
+
+        Implementation note: the bbox edges are not differentiated through
+        min/max along the pin axis (autograd handles the chain through pin
+        positions naturally because torch.min/max of pin coordinates is
+        sub-differentiable in PyTorch). HPWL already provides a smooth
+        spreading force; the congestion term focuses gradient on bins where
+        many nets' bboxes pile up.
+        """
+        device = pin_pos.device
+        x = pin_pos[:, 0]
+        y = pin_pos[:, 1]
+        # Per-net pin bbox via segment scatter (max/min on pin-axis values).
+        out_max_x = torch.full((num_nets,), -1e30, dtype=x.dtype, device=device)
+        out_min_x = torch.full((num_nets,), 1e30, dtype=x.dtype, device=device)
+        out_max_y = torch.full((num_nets,), -1e30, dtype=y.dtype, device=device)
+        out_min_y = torch.full((num_nets,), 1e30, dtype=y.dtype, device=device)
+        max_x = out_max_x.scatter_reduce(0, p_netid, x, reduce="amax",
+                                         include_self=True)
+        min_x = out_min_x.scatter_reduce(0, p_netid, x, reduce="amin",
+                                         include_self=True)
+        max_y = out_max_y.scatter_reduce(0, p_netid, y, reduce="amax",
+                                         include_self=True)
+        min_y = out_min_y.scatter_reduce(0, p_netid, y, reduce="amin",
+                                         include_self=True)
+
+        # Net bbox vs bin overlap. Shapes: nets -> (num_nets, 1); bins -> (1, B).
+        nx_lo = min_x.unsqueeze(1)
+        nx_hi = max_x.unsqueeze(1)
+        ny_lo = min_y.unsqueeze(1)
+        ny_hi = max_y.unsqueeze(1)
+        ox = torch.clamp(torch.minimum(nx_hi, bx_hi) - torch.maximum(nx_lo, bx_lo),
+                         min=0.0)
+        oy = torch.clamp(torch.minimum(ny_hi, by_hi) - torch.maximum(ny_lo, by_lo),
+                         min=0.0)
+        # Per-(net, bin_row, bin_col) overlap area, weighted by net_w.
+        # einsum nr,nc->rc summing over nets, weighted by net_w. Normalise by
+        # num_nets so the loss is O(1.0) regardless of design size and the
+        # weight hyperparameter sits in the same range as ``density_weight``.
+        wt = net_w.to(device).float()
+        demand = torch.einsum("n,nr,nc->rc", wt, oy, ox) / (bin_area * max(1, num_nets))
+        # Top-k mean (squared) over flattened bins.
+        flat = demand.flatten()
+        k = max(1, int(topk_frac * flat.numel()))
+        top = torch.topk(flat, k).values
+        return top.pow(2).mean()
 
     def _overlap_loss(self, pos, half, nh, tri):
         """Total pairwise hard-macro overlap area (a vanishing barrier).
