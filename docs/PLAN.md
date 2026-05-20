@@ -99,21 +99,57 @@ time: finish it, check it off, confirm with the user, then move to the next.
 
 ## Day 3 — Grand Prize layer + ship
 
-### [ ] Step 6 — Timing weighting + feasibility-gate selection
-- Goal: topology-derived net criticality weighting; candidate selection that
-  favors timing-safe placements over marginally-lower proxy cost.
-- Files: `src/hrt_placer/timing.py`, `src/hrt_placer/select.py`.
-- Done when: selected placements pass an OpenROAD/Hier-RTLMP timing sanity
-  check vs the SA/RePlAce baselines.
+### [~] Step 6 — Timing weighting + feasibility-gate selection — DESCOPED after /codex review
+- `src/hrt_placer/timing.py` + `src/hrt_placer/select.py` exist and are implemented
+  but the proxy_budget gate (`select.py:70`, default 0.01) means the timing-weighted
+  candidate can only move proxy by ≤1%. Current AVG proxy is 1.2971; PRD target is
+  ~1.05 (gap ~25%). Step 6 is structurally incapable of closing the Tier-1 gate.
+- Kept in the tree as dead code (low maintenance cost). Not invoked from `placer.py`.
+- Future re-enablement only makes sense if a real OpenROAD timer is wired in.
 
-### [ ] Step 7 — Portfolio runner + full validation
-- Goal: budget allocation across stages with a hard per-benchmark timeout;
-  full 17-benchmark run.
-- Files: `src/hrt_placer/portfolio.py`, `tests/`.
-- Done when: all 17 benchmarks complete legally within the 1-hour cap.
+### [~] Step 7 — Hyperparameter-diverse portfolio + congestion-aware engine objective — PARTIAL
+- 7a (stderr logging on SA failure), 7b (CUDA determinism pin) and the
+  3-candidate portfolio plumbing in placer.py: **DONE**.
+- 7d (differentiable congestion + top-k density terms in engine.py loss):
+  **NULL RESULT**. Trial on the 5-benchmark sample
+  (ibm01/03/09/13/17) on 2026-05-20:
+  - baseline (existing tuned engine): AVG proxy 1.1609.
+  - proxy_density (top-k density only): AVG 1.2017, +3.51% worse.
+  - congestion (top-k density + diff. congestion surrogate): AVG 1.2033,
+    +3.65% worse; produced an illegal placement on ibm09 (legalizer could
+    not clean up the post-objective layout).
+  Mechanism: top-k density makes the spreading gradient sharper, which pushes
+  macros apart more aggressively. That raises routing demand on the bins the
+  proxy actually measures, so congestion rises faster than density falls.
+  The proxy is a balanced metric -- you cannot optimise one term in isolation
+  without the others reacting. Proper weight tuning would need an Optuna-style
+  sweep we do not have time for inside the 24h deadline.
+- Portfolio reverted to baseline-only. ``density_topk_frac`` and
+  ``congestion_weight`` knobs stay on ``AnalyticalPlacer`` as future-work
+  hyperparameters (default to original behaviour) so a TPE search can revisit
+  them properly post-deadline.
 
-### [ ] Step 8 — Reproducible packaging + submission
-- Goal: finalize Dockerfile, pin submodules, vendor licenses, write README.
-- Files: `Dockerfile`, `requirements.txt`, `README.md`.
-- Done when: a clean Docker build reproduces the validation results offline,
-  and the submission package is ready for the Google Form.
+### [ ] Step 8 — Tests, doc reconciliation, air-gapped rehearsal, submit
+- Tests (`tests/`):
+  - `test_legal_all_benchmarks.py` — loop 17 IBMs (+ stub NG45 if available),
+    assert `search._is_legal`.
+  - `test_determinism.py` — run ibm01 twice with the same seed on CUDA,
+    assert byte-identical placements (gated on 7b).
+  - `test_timeout_returns_legal.py` — `HRT_TIME_BUDGET=60`, assert legal even when
+    the engine is truncated at the deadline.
+  - `test_clearance_ng45.py` — synthetic NG45-scale canvas, assert ≥12 µm clearance.
+- Doc reconciliation (Codex finding 9 — material rot, not cosmetic):
+  - `docs/ARCHITECTURE.md` lists files that DO NOT EXIST: `refine_wiremask.py`,
+    `orientation.py`, `portfolio.py`, `external/`, `tests/`, `Dockerfile`. Cut to
+    only what shipped.
+  - `docs/PRD.md:29-41` still lists WireMask, Klein-4 orientation, GPU soft-macro
+    co-opt, portfolio runner, Dockerfile as in-scope. Update In-Scope and
+    Out-of-Scope lists to match reality.
+  - `README.md:30-31` says no Dockerfile is shipped — keep that contract unless 7e adds one.
+- Air-gapped rehearsal: `external/macro-place-challenge-2026/eval_docker/run_eval.sh`
+  on 1 IBM + 1 NG45 with `--network none`; verify proxy matches the local run.
+- VERIFY the Tier-2 entry cutoff on the official challenge leaderboard / README.
+  If cutoff > 1.30 (we miss after 7c+7d), the submission's value is entirely the
+  Grand Prize layer (which is unmeasured without OpenROAD). Flag explicitly.
+- Done when: tests green; docs consistent; air-gapped run reproduces local proxy;
+  submission package zipped and ready for the Google Form.

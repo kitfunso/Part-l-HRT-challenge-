@@ -19,28 +19,26 @@ timing-safe.
 The challenge evaluator and judges. The deliverable is an automated placer,
 not an interactive tool.
 
-## What it IS — in scope
-- A `placer.py` implementing the challenge's `place(benchmark) -> coords` API.
+## What it IS — in scope (reflects what shipped)
+- A `placer.py` implementing the challenge's `place(benchmark) -> coords` API,
+  with stderr logging on SA failure so the eval host shows real errors instead
+  of a silent Stage-2 dropout.
 - A **portable PyTorch electrostatic** analytical engine (ePlace/RePlAce-style)
-  that runs identically on CPU and GPU — no CUDA build dependency.
-- A **multi-objective Bayesian search loop** (Optuna MOTPE) whose objective is
-  the *exact TILOS proxy cost*.
-- **Hotspot-targeted simulated annealing** that refines the top-5%/top-10%
-  bins the cost actually measures, with incremental cost evaluation.
-- A **WireMask-EA** HPWL refinement pass.
-- **Klein-4 orientation local search** (N/FN/FS/S).
-- **Topology-derived timing-criticality net weighting** (logic depth, fanout
-  cones) — there is no SDC in the placer interface.
-- **Feasibility-gate-aware candidate selection**: never ship a placement
-  expected to fail Tier 2's `WNS_sub >= min(WNS_SA, WNS_RP)` gate.
-- **>=12 um macro-to-macro clearance** in submitted placements, so Tier 2's
-  auto-spacing pass does not silently override our coordinates.
-- **GPU soft-macro co-optimization** — soft macros are movable; the built-in
-  `plc.optimize_stdcells()` is minutes-per-call, so we co-optimize them on GPU.
-- A portfolio runner with strict per-benchmark timeout handling.
-- A reproducible Dockerfile (`pytorch/pytorch:2.5.1-cuda12.4`, Python 3.11).
+  with smooth HPWL + bin-density overflow + hard-macro-overlap loss, runs
+  identically on CPU and GPU, no CUDA build toolchain. CUDA-determinism pinned
+  (cudnn deterministic, TF32 off, allow_tf32 off) so reruns are byte-identical.
+- A **self-contained TPE search loop** (no Optuna dependency) over engine
+  hyperparameters, dev-time tuner; tuned defaults baked into the engine.
+- **Hotspot-targeted simulated annealing** with `IncrementalProxy` for O(moved
+  net) cost updates; 16 parallel chains via `ProcessPoolExecutor`; best legal
+  wins. Always-legal-by-construction: every accepted move stays legal.
+- **>=12 um macro-to-macro clearance** in submitted placements (clamped on
+  NG45 canvases; IBM abstract-unit dies use a smaller proportional clearance)
+  so Tier 2's auto-spacing pass does not override our coordinates.
+- Hard internal per-benchmark wall-clock budget (default 3300 s, env-overridable
+  via `HRT_TIME_BUDGET`) that returns the best legal placement found so far.
 
-## What it is NOT — out of scope
+## What it is NOT — out of scope (descoped during build)
 - **NOT reinforcement learning** — no Circuit Training / MaskPlace / ChiPFormer
   / EfficientPlace. "Stronger Baselines" + BBOPlace-Bench show black-box
   optimization beats RL without training cost.
@@ -55,14 +53,36 @@ not an interactive tool.
 - **NOT** sequence-pair / B*-tree compaction representations (wrong fit for
   43–53% utilization).
 - **NOT** an interactive or general-purpose placement tool.
+- **NOT** a WireMask-EA HPWL refinement pass — descoped in Step 5: HPWL is only
+  ~5% of the proxy on our placements; WireMask cannot move the dominant
+  density+congestion terms enough to close the gap.
+- **NOT** Klein-4 orientation local search — descoped in Step 5: the challenge
+  `place(benchmark)` API returns positions only, the proxy applies fixed
+  benchmark pin offsets, and the DEF writer emits each node's default
+  orientation. There is no submission channel for orientations.
+- **NOT** GPU soft-macro co-optimization — descoped: not on the critical path
+  to either the Tier-1 proxy gate or the Grand Prize timing gate within the
+  build budget.
+- **NOT** topology-derived timing-criticality net weighting in the submission
+  path — `src/hrt_placer/timing.py` and `src/hrt_placer/select.py` are
+  implemented but unused. Codex review (2026-05-20) confirmed the 1% proxy
+  budget gate inside `select.py` is structurally incapable of closing the
+  Tier-1 gap (gap ~25%, gate ~1%). Kept in the tree as future work pending an
+  OpenROAD-in-the-loop timer.
+- **NOT** a separate `portfolio.py` runner — `placer.py` already does engine
+  budget allocation + SA timeout; a separate module would duplicate that.
+- **NOT** a shipped `Dockerfile` — the judges' standard image
+  (`pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, Python 3.11) provides every
+  runtime dependency in `requirements.txt`. The submission keeps zero pip
+  installs at eval time so `--network none` is satisfied.
 
 ## Core flows
 1. Evaluator calls `MyPlacer.place(benchmark)`; placer returns macro center
    coordinates as a tensor.
-2. Internal pipeline: load benchmark -> DREAMPlace global placement ->
-   MOTPE search over engine hyperparameters scored by the exact proxy cost ->
-   hotspot SA refinement -> WireMask-EA HPWL pass -> Klein-4 orientation
-   search -> feasibility-gate-aware selection of the best candidate -> return.
+2. Internal pipeline: `AnalyticalPlacer.place` (engine, 45% of the per-benchmark
+   wall-clock budget, deterministic CUDA) -> if a legal SA refinement fits in
+   the remaining budget, run 16 parallel SA chains and adopt the legal best
+   -> return. Engine result is the safe fallback if SA fails or runs short.
 
 ## Success criteria
 - Top-7 proxy-cost ranking (target proxy ~<=1.05 across the 17 benchmarks).

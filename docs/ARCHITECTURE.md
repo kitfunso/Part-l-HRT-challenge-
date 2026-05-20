@@ -13,23 +13,29 @@
 .
 ├── placer.py                  # submission entry point: MyPlacer.place(benchmark)
 ├── src/hrt_placer/
-│   ├── engine.py              # DREAMPlace global-placement wrapper
+│   ├── engine.py              # portable PyTorch electrostatic analytical placer
 │   ├── proxy_cost.py          # exact TILOS proxy cost (WL + density + congestion)
-│   ├── search.py              # MOTPE/Bayesian loop over engine hyperparameters
-│   ├── refine_sa.py           # hotspot-targeted SA, incremental cost
-│   ├── refine_wiremask.py     # WireMask-EA HPWL pass
-│   ├── orientation.py         # Klein-4 orientation local search
-│   ├── timing.py              # topology-derived net criticality weighting
-│   ├── select.py              # feasibility-gate-aware candidate selection
-│   └── portfolio.py           # per-benchmark runner + timeout handling
-├── external/
-│   ├── WireMask-BBO/          # submodule (MIT), optional refinement
-│   └── macro-place-challenge-2026/  # challenge harness, reference only
+│   ├── search.py              # TPE search over engine hyperparameters (dev-time)
+│   ├── refine_sa.py           # hotspot-targeted SA + IncrementalProxy + 16-chain parallel
+│   ├── timing.py              # topology-derived net criticality weighting (opt-in, currently unused in submission path)
+│   └── select.py              # feasibility-gate-aware candidate selection (opt-in, currently unused in submission path)
+├── scripts/
+│   ├── calibrate.py           # calibrate ProxyCost vs real evaluator
+│   └── dev_eval.py            # convenience harness for IBM regression runs
 ├── docs/                      # PRD, ARCHITECTURE, AI_RULES, PLAN
-├── tests/                     # legality + timeout + per-benchmark checks
-├── Dockerfile
+├── tests/                     # legality + timeout + determinism checks (Step 8)
 └── requirements.txt
 ```
+
+**Not included in the repo** (provided by the local dev workflow, not the
+submission package):
+- `external/macro-place-challenge-2026/` — challenge harness, cloned locally for
+  evaluator runs (`uv run python -m macro_place.evaluate`). The judges drop their
+  own harness around the submission, so it is not checked in.
+- `Dockerfile` — not shipped. The judges' standard image
+  (`pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, Python 3.11) provides every
+  runtime dependency listed in `requirements.txt`; see `README.md` for the
+  run-eval invocation.
 
 ## Data model
 - `Benchmark`: macro sizes, initial positions, fixed mask, canvas/grid dims,
@@ -41,24 +47,21 @@
 ## Modules & responsibilities
 | Module | Responsibility |
 |--------|----------------|
-| `engine.py` | Portable PyTorch electrostatic global placement for a hyperparameter set |
-| `proxy_cost.py` | Compute the exact TILOS proxy cost; expose incremental updates |
-| `search.py` | MOTPE search over hyperparameters; objective = exact proxy cost |
-| `refine_sa.py` | Hotspot SA on top-5%/10% bins; incremental delta evaluation |
-| `refine_wiremask.py` | WireMask-EA wire-mask refinement of HPWL |
-| `orientation.py` | Per-macro best-of-4 Klein-4 orientation search |
-| `timing.py` | Net-weight model from logic depth / fanout-cone topology |
-| `select.py` | Choose proxy-good + timing-safe candidate; enforce feasibility gate |
-| `portfolio.py` | Budget allocation across stages; hard 1-hour timeout per benchmark |
+| `placer.py` | Submission entry point; orchestrates engine + SA refinement under a hard wall-clock budget; logs SA failures to stderr |
+| `engine.py` | Portable PyTorch electrostatic global placement; smooth HPWL + density-overflow + macro-overlap objective; CUDA-determinism pinned (cudnn deterministic, TF32 off) |
+| `proxy_cost.py` | Compute the exact TILOS proxy cost (WL + density + congestion + macro-routing-blockage); expose grid routing primitives reused by SA |
+| `search.py` | Self-contained TPE search over engine hyperparameters; dev-time tuner |
+| `refine_sa.py` | Hotspot-targeted SA with `IncrementalProxy` (mutable proxy bookkeeping); 16-chain `ProcessPoolExecutor` parallel; best legal wins |
+| `timing.py` | Net-weight model from BFS depth from I/O ports (opt-in; not invoked from `placer.py`) |
+| `select.py` | Proxy-budget-gated candidate picker (uniform vs criticality-weighted) (opt-in; not invoked from `placer.py`) |
 
-## Data flow
-`Benchmark` -> `engine` (global place) -> `search` (BO over configs, scored by
-`proxy_cost`) -> Pareto candidates -> `refine_sa` + `refine_wiremask` +
-`orientation` -> `select` (proxy + timing-safety) -> legal macro coords back to
-the evaluator. `timing.py` supplies net weights consumed by `engine` and
-`refine_*`. `portfolio.py` wraps the whole flow with the time budget.
+## Data flow (submission path)
+`Benchmark` → `AnalyticalPlacer.place` (engine, deadline = 45% of budget)
+→ `refine_sa.refine` (16 parallel SA chains on the engine's legal output,
+budget = remaining minus a 90 s safety margin) → legal macro coords back to
+the evaluator. The engine result is the safe fallback at every stage.
 
 ## External dependencies
-- WireMask-BBO: optional pinned submodule, vendored license. Optuna via pip.
-- All dependencies bundled into the Docker image — the evaluator runs with
-  `--network none`, so no runtime downloads are permitted.
+- Runtime: only `torch>=2.5,<2.6` and `numpy>=1.26,<3.0` (see `requirements.txt`),
+  both provided by the judges' standard image. No pip installs are needed at
+  evaluation time, which is required because the evaluator runs with `--network none`.
