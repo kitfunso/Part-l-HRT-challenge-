@@ -28,7 +28,12 @@ class MyPlacer:
     """Analytical placement + SA refinement under a hard time budget."""
 
     # 55 min: margin under the 1-hour-per-benchmark evaluator cap.
+    # ``HRT_TIME_BUDGET`` (seconds) overrides the default -- useful for
+    # smoke tests and for judges who want a tighter wall-clock cap.
     def __init__(self, time_budget=3300.0):
+        env = os.environ.get("HRT_TIME_BUDGET")
+        if env:
+            time_budget = float(env)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.time_budget = time_budget
 

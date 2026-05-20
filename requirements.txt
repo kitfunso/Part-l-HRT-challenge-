@@ -1,0 +1,8 @@
+# Runtime dependencies for the hrt-placer submission.
+#
+# All of these ship in the judges' standard image
+# (pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime) so no extra install is
+# needed at evaluation time. Pinned to the versions the image provides
+# for reproducibility on other hosts.
+torch>=2.5,<2.6
+numpy>=1.26,<3.0
