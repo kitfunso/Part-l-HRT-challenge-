@@ -21,25 +21,42 @@ for _cand in (_HERE, os.path.join(_HERE, "src")):
 import torch  # noqa: E402
 
 from hrt_placer.engine import AnalyticalPlacer  # noqa: E402
+from hrt_placer.engine_v2 import AnalyticalPlacerV2  # noqa: E402
 from hrt_placer.proxy_cost import ProxyCost  # noqa: E402
 from hrt_placer.refine_sa import refine  # noqa: E402
 from hrt_placer.refine_soft import refine_soft_macros  # noqa: E402
 from hrt_placer.search import _is_legal  # noqa: E402
 
 
-# Engine portfolio. The placer scores each candidate by ``ProxyCost`` and
-# feeds the legal winner to SA. A short hyperparameter-diverse portfolio was
-# trialled on 2026-05-20 (``proxy_density`` and ``congestion`` candidates with
-# top-k density loss + a differentiable congestion surrogate) but regressed
-# proxy by +3.5% on a 5-benchmark sample (ibm01/03/09/13/17) and produced an
-# illegal placement on ibm09. Top-k density pushes macros apart more
-# aggressively, raising routing demand faster than density falls -- net
-# proxy worse. Reverted to the single tuned baseline (which is the same
-# AnalyticalPlacer the prior submission used). The unused tuning knobs
-# (``density_topk_frac``, ``congestion_weight``) remain on ``AnalyticalPlacer``
-# for future TPE search but default to original behaviour.
+def _make_engine(cfg, device):
+    """Instantiate the engine class named by ``cfg['engine']`` with the
+    config's remaining kwargs. Defaults to AnalyticalPlacer (v1) when no
+    ``engine`` key is present, so legacy single-candidate configs still work.
+    """
+    klass = {
+        "v1": AnalyticalPlacer,
+        "v2": AnalyticalPlacerV2,
+    }[cfg.get("engine", "v1")]
+    kwargs = {k: v for k, v in cfg.items() if k not in ("name", "engine")}
+    return klass(device=device, **kwargs)
+
+
+# Engine portfolio. The placer scores each candidate via ``ProxyCost``,
+# applies the soft-refine gate per candidate, and feeds the per-bench winner
+# to SA. Currently a single baseline; the loop machinery is kept so future
+# portfolio members can be added without touching the place() body.
+#
+# History (2026-05-20 - 2026-05-21):
+#   - density_topk_frac=0.1 + congestion_weight=0.5 candidate regressed +3.5%
+#     on 5-bench, produced illegal on ibm09 -- rejected.
+#   - v2_wawl (Nesterov SGD + weighted-average WL via AnalyticalPlacerV2)
+#     wins ibm01's engine pass by 0.82% but the soft-refine gate equalises
+#     the candidates -- after refine, baseline + refine beats v2 + refine on
+#     all 5 benches. Net AVG gain: 0.00%. v2 kept in tree (engine_v2.py) as
+#     a research artifact and as the substrate for a future ePlace-style
+#     density schedule + congestion-aware loss.
 _PORTFOLIO = [
-    {"name": "baseline"},
+    {"name": "baseline", "engine": "v1"},
 ]
 
 
@@ -96,9 +113,8 @@ class MyPlacer:
             if time.time() > cand_deadline - 5.0:
                 # Not enough remaining budget for this candidate; skip cleanly.
                 continue
-            kwargs = {k: v for k, v in cfg.items() if k != "name"}
             try:
-                placement = AnalyticalPlacer(device=self.device, **kwargs).place(
+                placement = _make_engine(cfg, self.device).place(
                     benchmark, deadline=cand_deadline)
             except Exception as exc:
                 print(f"[placer] engine candidate '{cfg['name']}' raised "

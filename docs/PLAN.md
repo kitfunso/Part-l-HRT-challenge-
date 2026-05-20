@@ -129,6 +129,31 @@ time: finish it, check it off, confirm with the user, then move to the next.
   hyperparameters (default to original behaviour) so a TPE search can revisit
   them properly post-deadline.
 
+### [x] Step 7b — Post-engine soft-macro Adam refiner with per-bench gate
+- `src/hrt_placer/refine_soft.py` runs Adam on the soft-macro slice only
+  (hard macros frozen) under the engine's smooth HPWL + bin-density-overflow
+  loss. ``placer.py`` scores both engine and refined outputs via `ProxyCost`
+  per candidate and adopts the refined version only if its proxy is strictly
+  lower AND legal -- guaranteed non-regression.
+- 5-bench validation (real evaluator, lr=4e-3 n=200 wl=0.2 den=1.0):
+  per-bench delta ibm01 -2.57%, ibm03 +1.16% (rejected by gate),
+  ibm09 -0.75%, ibm13 -1.34%, ibm17 -2.18%. Post-gate AVG: **1.1456**
+  (vs 1.1563 engine-only baseline, **-0.92%**), all 5 legal.
+
+### [~] Step 7c — Weighted-average WL + Nesterov rebuild (engine_v2) — NULL ADD
+- `src/hrt_placer/engine_v2.py` (`AnalyticalPlacerV2`) replaces Adam+LSE-HPWL
+  with Nesterov-SGD+WA-WL per ePlace/DREAMPlace convention. ePlace's third
+  recommendation (density penalty multiplier schedule) skipped for time.
+- 5-bench validation 2026-05-21 (lr=0.01, momentum=0.9, n_iters=800):
+  ibm01 -0.82%, ibm03 +?, ibm09 +1.7%, ibm13 +0.93%, ibm17 +0.88%.
+  AVG +0.51% vs v1 engine alone.
+- After the per-bench soft-refine gate, baseline+refine beats v2+refine on
+  ALL 5 benches (soft-refine compresses both engines into similar local
+  minima, erasing v2's ibm01 edge). Net AVG gain from adding v2 to portfolio:
+  **0.00%**. Kept as research artifact for a future port that includes
+  ePlace's density-schedule (likely the missing piece) and the
+  congestion-aware loss properly TPE-tuned.
+
 ### [ ] Step 8 — Tests, doc reconciliation, air-gapped rehearsal, submit
 - Tests (`tests/`):
   - `test_legal_all_benchmarks.py` — loop 17 IBMs (+ stub NG45 if available),
