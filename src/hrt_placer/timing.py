@@ -41,7 +41,7 @@ def net_criticality_weights(
     port-to-macro connectivity exists.
     """
     num_nets = int(benchmark.num_nets)
-    weights = torch.ones(max(1, num_nets), dtype=torch.float32)[:num_nets]
+    weights = torch.ones(num_nets, dtype=torch.float32)
     if num_nets == 0:
         return weights
 

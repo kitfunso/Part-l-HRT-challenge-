@@ -85,19 +85,20 @@ def select_placement(
 
     crit = net_criticality_weights(benchmark, alpha=timing_alpha)
     orig_weights = benchmark.net_weights.clone()
+    try:
+        benchmark.net_weights = torch.ones_like(orig_weights)
+        t0 = time.time()
+        pl_uniform = placer_factory().place(benchmark)
+        uniform = _score(
+            "uniform", pl_uniform, benchmark, crit, time.time() - t0)
 
-    benchmark.net_weights = torch.ones_like(orig_weights)
-    t0 = time.time()
-    pl_uniform = placer_factory().place(benchmark)
-    uniform = _score("uniform", pl_uniform, benchmark, crit, time.time() - t0)
-
-    benchmark.net_weights = crit.clone()
-    t0 = time.time()
-    pl_weighted = placer_factory().place(benchmark)
-    weighted = _score(
-        "crit_weighted", pl_weighted, benchmark, crit, time.time() - t0)
-
-    benchmark.net_weights = orig_weights
+        benchmark.net_weights = crit
+        t0 = time.time()
+        pl_weighted = placer_factory().place(benchmark)
+        weighted = _score(
+            "crit_weighted", pl_weighted, benchmark, crit, time.time() - t0)
+    finally:
+        benchmark.net_weights = orig_weights
 
     best_proxy = min(uniform.proxy, weighted.proxy)
     proxy_cap = best_proxy * (1.0 + proxy_budget)
