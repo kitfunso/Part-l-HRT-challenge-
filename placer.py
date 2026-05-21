@@ -43,6 +43,41 @@ def _make_engine(cfg, device):
     return klass(device=device, **kwargs)
 
 
+def _run_tpe(benchmark, device, deadline, seed=0):
+    """Per-benchmark TPE auto-tuning of the v1 engine hyperparameters.
+
+    The engine's tuned defaults are a global compromise over a 10-benchmark
+    sample, so the hardest benchmarks (high utilisation / congestion) get a
+    config that does not suit them. ``search.HyperparamSearch`` runs a TPE
+    loop scored by the exact ``ProxyCost`` -- it was built to run at
+    submission time, per design, inside the hour budget. This wraps it with
+    a wall-clock deadline and returns the best config dict found, or None
+    if the search produced nothing or raised (the fixed portfolio then
+    carries the placement, so this is strictly additive).
+    """
+    try:
+        from hrt_placer.search import HyperparamSearch
+        s = HyperparamSearch([benchmark], seed=seed, device=device)
+        n = 0
+        # run trials one at a time so the wall-clock deadline is respected;
+        # cap at 40 so a fast benchmark does not spin pointlessly.
+        while time.time() < deadline - 25.0 and n < 40:
+            s.run(n_trials=1, n_startup=8, verbose=False)
+            n += 1
+        if not s.trials:
+            return None
+        best_cfg, best_score = s.best()
+        print(f"[placer] TPE: {n} trials on {benchmark.name}, "
+              f"best score={best_score:.4f} (<1.0 beats stock defaults)",
+              file=sys.stderr, flush=True)
+        return best_cfg
+    except Exception as exc:
+        print(f"[placer] TPE search failed ({type(exc).__name__}: {exc}); "
+              f"using fixed portfolio", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        return None
+
+
 # Engine portfolio. The placer runs every candidate, scores each via
 # ``ProxyCost``, applies the soft-refine gate per candidate, and feeds the
 # per-bench winner to SA. The per-bench ProxyCost gate makes adding a
@@ -109,8 +144,6 @@ class MyPlacer:
         # Each candidate's deadline is absolute; the engine legalises (shelf-pack
         # fallback) even on a deadline hit, so every candidate's output is legal.
         # ProxyCost is constructed once and reused across candidates.
-        n = len(_PORTFOLIO)
-        per_candidate = 0.45 / max(1, n) * self.time_budget
         try:
             pc = ProxyCost(benchmark)
         except Exception as exc:
@@ -120,11 +153,29 @@ class MyPlacer:
             traceback.print_exc(file=sys.stderr)
             pc = None
 
+        # Stage 0 - per-benchmark TPE auto-tuning. Gets ~22% of the budget.
+        # The tuned config becomes the first portfolio candidate; the
+        # per-bench ProxyCost gate keeps it only if it actually wins, so a
+        # bad search never regresses the result.
+        tpe_deadline = t0 + 0.22 * self.time_budget
+        tuned_cfg = _run_tpe(benchmark, self.device, tpe_deadline)
+        portfolio = list(_PORTFOLIO)
+        if tuned_cfg is not None:
+            portfolio = ([{"name": "tuned", "engine": "v1", **tuned_cfg}]
+                         + portfolio)
+
         best_placement = None
         best_cost = float("inf")
         best_name = None
-        for i, cfg in enumerate(_PORTFOLIO):
-            cand_deadline = t0 + (i + 1) * per_candidate
+        # Engine portfolio runs between now and 55% of the budget; SA gets
+        # the final ~45%. Deadlines are spaced from the loop start (not t0)
+        # so the TPE time already spent does not starve the candidates.
+        eng_end = t0 + 0.55 * self.time_budget
+        loop_start = time.time()
+        per_candidate = max(1.0, (eng_end - loop_start)
+                            / max(1, len(portfolio)))
+        for i, cfg in enumerate(portfolio):
+            cand_deadline = loop_start + (i + 1) * per_candidate
             if time.time() > cand_deadline - 5.0:
                 # Not enough remaining budget for this candidate; skip cleanly.
                 continue

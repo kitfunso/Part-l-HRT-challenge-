@@ -137,10 +137,17 @@ class AnalyticalPlacer:
         self.device = device
         self.verbose = verbose
 
-    def place(self, benchmark, deadline=None):
+    def place(self, benchmark, deadline=None, init_override=None):
         """Return a legal placement. ``deadline`` is an absolute ``time.time()``
         after which the analytical loop and legalizer stop early; the shelf-pack
-        fallback still runs, so the result is legal even on a timeout."""
+        fallback still runs, so the result is legal even on a timeout.
+
+        ``init_override`` -- optional ``[num_macros, 2]`` micron-coordinate
+        tensor used as the starting placement instead of
+        ``benchmark.macro_positions``. With ``n_iters=0`` this turns the engine
+        into a pure legaliser for an externally-produced placement (e.g. a
+        DREAMPlace global-placement solution): the analytical loop is skipped
+        and only the push-apart + shelf-pack legaliser runs."""
         device = torch.device(self.device)
         torch.manual_seed(self.seed)
         # Determinism across reruns / across the dev (RTX 5080) vs judges'
@@ -181,7 +188,10 @@ class AnalyticalPlacer:
         hi = torch.maximum(1.0 - half, lo)
         fixed = benchmark.macro_fixed.to(device).bool()  # [N]
 
-        ref = benchmark.macro_positions.to(device).float()
+        if init_override is not None:
+            ref = init_override.to(device).float()
+        else:
+            ref = benchmark.macro_positions.to(device).float()
         init = torch.clamp(ref / canvas, lo, hi)
 
         var = init.clone().detach().requires_grad_(True)

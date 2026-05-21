@@ -74,7 +74,7 @@ class HyperparamSearch:
 
     def __init__(self, benchmarks, space=None, seed=0,
                  gamma=0.25, n_candidates=48, bandwidth=0.22,
-                 illegal_penalty=2.0):
+                 illegal_penalty=2.0, device="cpu"):
         self.benchmarks = list(benchmarks)
         self.space = space or DEFAULT_SPACE
         self.names = list(self.space.keys())
@@ -84,6 +84,10 @@ class HyperparamSearch:
         self.n_candidates = n_candidates
         self.bw = bandwidth
         self.illegal_penalty = illegal_penalty
+        # device for the trial AnalyticalPlacer runs -- "cuda" makes the
+        # search ~40x faster, which matters when it runs at submission time
+        # inside the per-benchmark budget.
+        self.device = device
         self.trials = []        # list of (uvec, score, config, legal)
         self._pc = None
         self._baseline = None
@@ -107,7 +111,7 @@ class HyperparamSearch:
         self._pc = [ProxyCost(bm) for bm in self.benchmarks]
         self._baseline = []
         for i, bm in enumerate(self.benchmarks):
-            placer = AnalyticalPlacer()  # stock defaults
+            placer = AnalyticalPlacer(device=self.device)  # stock defaults
             placement = placer.place(bm)
             cost = self._pc[i](placement)["proxy_cost"]
             self._baseline.append(cost)
@@ -119,7 +123,7 @@ class HyperparamSearch:
         self._ensure_baseline()
         ratios, legal_all = [], True
         for i, bm in enumerate(self.benchmarks):
-            placer = AnalyticalPlacer(seed=seed, **config)
+            placer = AnalyticalPlacer(seed=seed, device=self.device, **config)
             placement = placer.place(bm)
             if not _is_legal(placement, bm):
                 legal_all = False
