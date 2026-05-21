@@ -402,17 +402,36 @@ def _run_chain(benchmark, placement, budget, seed):
     t0 = cur * float(10 ** cfg.uniform(-4.5, -3.7))
     t_end = t0 * 0.02
 
+    # --- basin hopping -------------------------------------------------
+    # Vanilla SA cools once over the whole budget and does small moves, so
+    # it polishes a single basin and stalls. Basin hopping uses the full
+    # time budget: when the search has not improved ``best_cost`` for
+    # ``stuck_limit`` iterations it (a) optionally re-centres on the global
+    # best, (b) applies a forced legal swap cascade -- a big jump to a
+    # different basin -- and (c) reheats the temperature. ``best_pos`` is
+    # preserved across every hop, so a hop into a worse basin never costs
+    # us the best placement found. The per-cycle cooling lets each basin
+    # be properly annealed before the next hop.
+    cycle_len = max(20000, movable.size * 60)
+    stuck_limit = max(8000, movable.size * 20)
+    kick_size = max(5, movable.size // 6)
+
     start = time.time()
     deadline = start + budget
     hot = movable
     iters = 0
+    stuck = 0
+    since_kick = 0
+    n_kicks = 0
 
     while True:
         iters += 1
+        since_kick += 1
         if iters % 128 == 0 and time.time() > deadline:
             break
-        frac = min(1.0, (time.time() - start) / budget)
-        temp = t0 * (t_end / t0) ** frac
+        # per-cycle cooling: temperature resets hot after each basin hop.
+        cyc = min(1.0, since_kick / cycle_len)
+        temp = t0 * (t_end / t0) ** cyc
 
         if iters % 256 == 1:
             _, Hg, Vg = ip.congestion(return_grids=True)
@@ -428,7 +447,7 @@ def _run_chain(benchmark, placement, budget, seed):
              else int(movable[rng.integers(movable.size)]))
 
         if rng.random() > swap_frac:
-            sigma = bin_d * (sig_hi - (sig_hi - sig_lo) * frac)
+            sigma = bin_d * (sig_hi - (sig_hi - sig_lo) * cyc)
             nx = ip.pos[a, 0] + rng.normal(0, sigma)
             ny = ip.pos[a, 1] + rng.normal(0, sigma)
             if not ip.legal(a, nx, ny):
@@ -447,9 +466,31 @@ def _run_chain(benchmark, placement, budget, seed):
             if cur < best_cost - 1e-12:
                 best_cost = cur
                 best_pos = ip.pos.copy()
+                stuck = 0
+            else:
+                stuck += 1
         else:
             for tok in reversed(undo):
                 ip.undo(tok)
+            stuck += 1
+
+        # Basin hop when the search has stalled.
+        if stuck >= stuck_limit:
+            n_kicks += 1
+            # Every 4th hop, re-centre on the global best so a run of bad
+            # basins does not drift the search away permanently.
+            if n_kicks % 4 == 0:
+                ip = IncrementalProxy(benchmark, best_pos)
+                cur = ip.cost()
+            # Forced legal swap cascade: a big jump to a new basin. Swaps
+            # of like-sized macros stay legal; force-accept (no undo).
+            for _ in range(kick_size):
+                a = int(movable[rng.integers(movable.size)])
+                res = try_swap(a, partner(a))
+                if res is not None:
+                    cur = res[0]
+            stuck = 0
+            since_kick = 0
 
     return best_cost, best_pos
 
