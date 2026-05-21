@@ -22,6 +22,7 @@ import torch  # noqa: E402
 
 from hrt_placer.engine import AnalyticalPlacer  # noqa: E402
 from hrt_placer.engine_v2 import AnalyticalPlacerV2  # noqa: E402
+from hrt_placer.engine_v3 import AnalyticalPlacerV3  # noqa: E402
 from hrt_placer.proxy_cost import ProxyCost  # noqa: E402
 from hrt_placer.refine_sa import refine  # noqa: E402
 from hrt_placer.refine_soft import refine_soft_macros  # noqa: E402
@@ -36,27 +37,39 @@ def _make_engine(cfg, device):
     klass = {
         "v1": AnalyticalPlacer,
         "v2": AnalyticalPlacerV2,
+        "v3": AnalyticalPlacerV3,
     }[cfg.get("engine", "v1")]
     kwargs = {k: v for k, v in cfg.items() if k not in ("name", "engine")}
     return klass(device=device, **kwargs)
 
 
-# Engine portfolio. The placer scores each candidate via ``ProxyCost``,
-# applies the soft-refine gate per candidate, and feeds the per-bench winner
-# to SA. Currently a single baseline; the loop machinery is kept so future
-# portfolio members can be added without touching the place() body.
+# Engine portfolio. The placer runs every candidate, scores each via
+# ``ProxyCost``, applies the soft-refine gate per candidate, and feeds the
+# per-bench winner to SA. The per-bench ProxyCost gate makes adding a
+# candidate strictly non-regressing: a candidate is only ever adopted on a
+# benchmark where it scores lowest.
+#
+#   baseline -- AnalyticalPlacer (Adam, log-sum-exp HPWL, bin-overflow
+#               density). Tuned defaults from the Step-3 TPE search.
+#   edensity_300 / edensity_600 -- AnalyticalPlacerV3: electrostatic density
+#               (FFT Poisson field over a bilinear-splatted density map)
+#               instead of bin-overflow. The global repulsion spreads macros
+#               where the local bin-overflow penalty leaves them clumped.
+#               edensity_weight is benchmark-sensitive; 300 and 600 bracket
+#               the optimum found on the 5-bench sweep (proxy is U-shaped in
+#               the weight). Per-bench: v3 wins ibm17 (-2.5%) and ibm01,
+#               v1 wins ibm13; portfolio-best AVG -1.73% vs v1-only.
 #
 # History (2026-05-20 - 2026-05-21):
-#   - density_topk_frac=0.1 + congestion_weight=0.5 candidate regressed +3.5%
-#     on 5-bench, produced illegal on ibm09 -- rejected.
-#   - v2_wawl (Nesterov SGD + weighted-average WL via AnalyticalPlacerV2)
-#     wins ibm01's engine pass by 0.82% but the soft-refine gate equalises
-#     the candidates -- after refine, baseline + refine beats v2 + refine on
-#     all 5 benches. Net AVG gain: 0.00%. v2 kept in tree (engine_v2.py) as
-#     a research artifact and as the substrate for a future ePlace-style
-#     density schedule + congestion-aware loss.
+#   - density_topk_frac=0.1 + congestion_weight=0.5: +3.5%, illegal ibm09.
+#   - v2 (Nesterov + weighted-average WL): 0.00% net after the refine gate;
+#     kept in tree (engine_v2.py) as a research artifact, not in the portfolio.
+#   - eDensity first port rasterised macros as hard rectangles -> degenerate
+#     gradient (+96%); fixed with bilinear density splatting (engine_v3.py).
 _PORTFOLIO = [
     {"name": "baseline", "engine": "v1"},
+    {"name": "edensity_300", "engine": "v3", "edensity_weight": 300.0},
+    {"name": "edensity_600", "engine": "v3", "edensity_weight": 600.0},
 ]
 
 
