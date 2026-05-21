@@ -61,6 +61,7 @@ class AnalyticalPlacerV3(AnalyticalPlacer):
         gamma_end=0.002,
         wl_weight=1.0,
         edensity_weight=1.0,
+        edensity_ramp=1.0,
         overlap_weight=6.0,
         legalize_gap=0.003,
         seed=0,
@@ -81,6 +82,13 @@ class AnalyticalPlacerV3(AnalyticalPlacer):
             verbose=verbose,
         )
         self.edensity_weight = edensity_weight
+        # edensity_ramp: the eDensity penalty starts at
+        # ``edensity_weight * edensity_ramp`` and rises geometrically to the
+        # full ``edensity_weight`` over the iteration schedule. ePlace ramps
+        # the density penalty so the optimiser minimises wirelength first and
+        # is pushed apart gradually -- applying full weight from iter 0 fights
+        # HPWL the whole way. ramp=1.0 disables it (constant full weight).
+        self.edensity_ramp = edensity_ramp
 
     @staticmethod
     def _splat_density(pos, mass, rows, cols):
@@ -227,7 +235,12 @@ class AnalyticalPlacerV3(AnalyticalPlacer):
 
             if lam is not None:
                 edens = self._edensity_loss(var, mass, rows, cols, lam)
-                loss = loss + self.edensity_weight * edens
+                # Geometric ramp of the eDensity penalty: start at
+                # edensity_weight * edensity_ramp, reach edensity_weight at
+                # the final iteration. ramp=1.0 -> constant full weight.
+                ew = self.edensity_weight * (
+                    self.edensity_ramp ** (1.0 - frac))
+                loss = loss + ew * edens
 
             if tri is not None and ov_w > 0:
                 ovl = self._overlap_loss(var, half, nh, tri)

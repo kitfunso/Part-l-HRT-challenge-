@@ -68,8 +68,10 @@ def _make_engine(cfg, device):
 #     gradient (+96%); fixed with bilinear density splatting (engine_v3.py).
 _PORTFOLIO = [
     {"name": "baseline", "engine": "v1"},
-    {"name": "edensity_300", "engine": "v3", "edensity_weight": 300.0},
-    {"name": "edensity_600", "engine": "v3", "edensity_weight": 600.0},
+    {"name": "edensity_600", "engine": "v3", "edensity_weight": 600.0,
+     "edensity_ramp": 0.2, "n_iters": 700},
+    {"name": "edensity_900", "engine": "v3", "edensity_weight": 900.0,
+     "edensity_ramp": 0.2, "n_iters": 700},
 ]
 
 
